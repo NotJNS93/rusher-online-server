@@ -6,11 +6,14 @@
   "scripts": {
     "start": "node server.js"
   },
-  "author": "",
+  "author": "YourName",
   "license": "ISC",
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "socket.io": "^4.7.5"
+  },
+  "engines": {
+    "node": "18.x"
   }
 }
