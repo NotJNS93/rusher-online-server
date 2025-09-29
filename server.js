@@ -1,5 +1,5 @@
 // ====================================================================================
-// ARQUIVO: server.js (Versão com CORS explícito para produção)
+// ARQUIVO: server.js (Versão com gerenciamento de jogador robusto)
 // ====================================================================================
 
 const express = require('express');
@@ -15,22 +15,36 @@ const server = http.createServer(app);
 const io = socketIo(server, { cors: corsOptions });
 
 const port = process.env.PORT || 3001;
-const players = {}; // Armazena por socket.id
+
+// Objeto para mapear charId -> socketId
+const charIdToSocketId = {};
+// Objeto principal que armazena os dados dos jogadores por socket.id
+const players = {}; 
 
 io.on('connection', (socket) => {
     console.log(`[CONEXÃO] Socket ${socket.id} conectado.`);
 
     socket.on('joinGame', (playerData) => {
-        if (!playerData || !playerData.name) {
-            console.log(`[AVISO] Tentativa de join de ${socket.id} sem dados válidos.`);
+        if (!playerData || !playerData.id) {
+            console.log(`[AVISO] Tentativa de join de ${socket.id} sem ID de personagem.`);
             return;
         }
-        console.log(`[JOIN] ${playerData.name} (Socket: ${socket.id}) entrou no jogo.`);
+
+        const charId = playerData.id;
+        console.log(`[JOIN] ${playerData.name} (Char ID: ${charId}) tentando entrar com socket ${socket.id}.`);
+
+        // --- LÓGICA ANTI-FANTASMA ---
+        // Se este personagem já está logado com outro socket, desconecta o socket antigo.
+        const oldSocketId = charIdToSocketId[charId];
+        if (oldSocketId && io.sockets.sockets.get(oldSocketId)) {
+            console.log(`[LIMPEZA] Desconectando socket antigo ${oldSocketId} para o personagem ${playerData.name}.`);
+            io.sockets.sockets.get(oldSocketId).disconnect(true);
+        }
         
-        players[socket.id] = { 
-            id: socket.id, // Adiciona o socket.id aos dados do jogador
-            ...playerData 
-        };
+        // Armazena a nova associação
+        socket.charId = charId; // Guarda o ID do personagem no socket para fácil acesso
+        charIdToSocketId[charId] = socket.id;
+        players[socket.id] = { socketId: socket.id, ...playerData };
 
         // Envia a lista de jogadores existentes para o novo jogador
         socket.emit('currentPlayers', players);
@@ -43,7 +57,6 @@ io.on('connection', (socket) => {
         const player = players[socket.id];
         if (player) {
             Object.assign(player, movementData);
-            // Retransmite os dados de movimento para os outros clientes
             socket.broadcast.emit('playerMoved', player);
         }
     });
@@ -51,10 +64,12 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         const player = players[socket.id];
         if (player) {
-            console.log(`[DESCONEXÃO] ${player.name} (Socket: ${socket.id}) desconectou.`);
+            console.log(`[DESCONEXÃO] ${player.name} (Char ID: ${player.id}) desconectou.`);
+            // Remove as referências
             delete players[socket.id];
-            // Avisa a todos os clientes que este socket.id saiu
-            io.emit('playerDisconnected', socket.id); 
+            delete charIdToSocketId[player.id];
+            // Avisa a todos os clientes que este PERSONAGEM (charId) saiu
+            io.emit('playerDisconnected', player.id); 
         } else {
             console.log(`[DESCONEXÃO] Socket anônimo ${socket.id} desconectou.`);
         }
