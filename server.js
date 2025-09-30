@@ -1,5 +1,5 @@
 // ====================================================================================
-// ARQUIVO: server.js (Versão com logs refinados e contagem de jogadores correta)
+// ARQUIVO: server.js (Versão com Heartbeat e Status do Servidor)
 // ====================================================================================
 
 const express = require('express');
@@ -16,18 +16,22 @@ const io = socketIo(server, { cors: corsOptions });
 
 const port = process.env.PORT || 3001;
 
-// Objeto para mapear charId -> socketId
 const charIdToSocketId = {};
-// Objeto principal que armazena os dados dos jogadores por socket.id
 const players = {}; 
 
-// A contagem de jogadores agora é baseada na lista de 'players'
-function broadcastPlayerCount() {
-    io.emit('updatePlayerCount', Object.keys(players).length);
-}
+// NOVO: Heartbeat do Servidor
+setInterval(() => {
+    const serverStatus = {
+        online: true,
+        playerCount: Object.keys(players).length,
+        maxPlayers: 100,
+        timestamp: Date.now()
+    };
+    // Emite o status para TODOS os sockets conectados, incluindo os da tela de seleção
+    io.emit('serverStatus', serverStatus);
+}, 2000); // A cada 2 segundos
 
 io.on('connection', (socket) => {
-    // Log inicial para qualquer conexão que chega
     console.log(`[CONEXÃO] Socket ${socket.id} estabeleceu conexão.`);
 
     socket.on('joinGame', (playerData) => {
@@ -39,34 +43,24 @@ io.on('connection', (socket) => {
         const charId = playerData.id;
         const oldSocketId = charIdToSocketId[charId];
 
-        // --- LÓGICA DE RECONEXÃO E ANTI-FANTASMA ---
         if (oldSocketId && oldSocketId !== socket.id) {
             console.log(`[RECONEXÃO] ${playerData.name} (Char ID: ${charId}) reconectou com um novo socket: ${socket.id}.`);
-            // Se o socket antigo ainda existir, o desconectamos.
             const oldSocket = io.sockets.sockets.get(oldSocketId);
             if (oldSocket) {
                 console.log(`[LIMPEZA] Desconectando socket antigo e inativo: ${oldSocketId}.`);
                 oldSocket.disconnect(true);
             }
-            // Remove o jogador antigo da lista, se ainda estiver lá
             delete players[oldSocketId];
         } else {
             console.log(`[JOIN] ${playerData.name} (Char ID: ${charId}) entrou no jogo com o socket ${socket.id}.`);
         }
         
-        // Associa o ID do personagem ao novo socket
         socket.charId = charId;
         charIdToSocketId[charId] = socket.id;
         players[socket.id] = { socketId: socket.id, ...playerData };
 
-        // Envia a lista de jogadores ATUALIZADA para o novo jogador
         socket.emit('currentPlayers', players);
-        
-        // Anuncia o novo jogador para todos os outros (exceto ele mesmo)
         socket.broadcast.emit('newPlayer', players[socket.id]);
-
-        // Atualiza a contagem de jogadores no mundo
-        broadcastPlayerCount();
     });
 
     socket.on('playerMovement', (movementData) => {
@@ -83,15 +77,22 @@ io.on('connection', (socket) => {
             console.log(`[DESCONEXÃO] ${player.name} (Char ID: ${player.id}) desconectou.`);
             delete players[socket.id];
             delete charIdToSocketId[player.id];
-            
-            // Avisa a todos que este PERSONAGEM saiu
             io.emit('playerDisconnected', player.id); 
-            broadcastPlayerCount();
         } else {
-            console.log(`[DESCONEXÃO] Socket anônimo ${socket.id} que nunca entrou no jogo desconectou.`);
+            console.log(`[DESCONEXÃO] Socket anônimo ${socket.id} desconectou.`);
         }
     });
 });
+
+// Lógica para Desconexão em Massa (Reinício do Servidor)
+process.on('SIGINT', () => {
+    console.log("Servidor está sendo desligado. Desconectando todos os jogadores...");
+    io.emit('serverShutdown', { message: 'O servidor está reiniciando. Você foi desconectado.' });
+    setTimeout(() => {
+        process.exit(0);
+    }, 1000); // Dá 1 segundo para a mensagem ser enviada
+});
+
 
 app.get('/', (req, res) => {
   res.send('Servidor Rusher Online está rodando!');
