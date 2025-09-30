@@ -35,7 +35,7 @@ function broadcastPlayerCount() {
 }
 
 io.on('connection', (socket) => {
-    console.log(`[CONEXÃO] Novo socket conectado: ${socket.id}`);
+    // console.log(`[CONEXÃO] Novo socket conectado: ${socket.id}`);
     
     // Envia o status atual assim que alguém conecta
     broadcastPlayerCount();
@@ -43,11 +43,11 @@ io.on('connection', (socket) => {
     // Quando um jogador efetivamente entra no mundo com um personagem
     socket.on('joinGame', (playerData) => {
         if (!playerData || !playerData.id) {
-            console.log(`[AVISO] Tentativa de join sem um ID de personagem válido do socket ${socket.id}`);
+            // console.log(`[AVISO] Tentativa de join sem um ID de personagem válido do socket ${socket.id}`);
             return;
         }
 
-        console.log(`[JOIN] ${playerData.name} (Char ID: ${playerData.id}) entrou no jogo com o socket ${socket.id}.`);
+        // console.log(`[JOIN] ${playerData.name} (Char ID: ${playerData.id}) entrou no jogo com o socket ${socket.id}.`);
         
         // Armazena o ID do personagem no objeto do socket para referência futura
         socket.charId = playerData.id;
@@ -82,7 +82,7 @@ io.on('connection', (socket) => {
         // Usa o charId armazenado no socket para identificar quem desconectou
         const charId = socket.charId;
         if (charId && players[charId]) {
-            console.log(`[DESCONEXÃO] ${players[charId].name} (Char ID: ${charId}) desconectou.`);
+            // console.log(`[DESCONEXÃO] ${players[charId].name} (Char ID: ${charId}) desconectou.`);
             
             // Remove o jogador da lista
             delete players[charId];
@@ -93,7 +93,7 @@ io.on('connection', (socket) => {
             // Atualiza a contagem de jogadores
             broadcastPlayerCount();
         } else {
-            console.log(`[DESCONEXÃO] Socket anônimo ${socket.id} fechado.`);
+            // console.log(`[DESCONEXÃO] Socket anônimo ${socket.id} fechado.`);
         }
     });
 });
