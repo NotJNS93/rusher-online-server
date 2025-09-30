@@ -1,5 +1,6 @@
 // ====================================================================================
-// ARQUIVO: server.js (Versão com Heartbeat e Status do Servidor)
+// ARQUIVO: server.js (Versão Final para Render)
+// RESPONSÁVEL POR: Servidor de jogo "rusher_GameServer" para deploy online.
 // ====================================================================================
 
 const express = require('express');
@@ -8,92 +9,96 @@ const socketIo = require('socket.io');
 const cors = require('cors');
 
 const app = express();
-const corsOptions = { origin: "*" };
-app.use(cors(corsOptions));
+app.use(cors());
 
 const server = http.createServer(app);
-const io = socketIo(server, { cors: corsOptions });
+const io = socketIo(server, {
+  cors: {
+    origin: "*", // Permite que qualquer site (seu jogo no Firebase/Netlify) se conecte
+    methods: ["GET", "POST"]
+  }
+});
 
 const port = process.env.PORT || 3001;
 
-const charIdToSocketId = {};
-const players = {}; 
+// Objeto para armazenar jogadores, agora usando o ID do personagem como chave principal.
+const players = {};
 
-// NOVO: Heartbeat do Servidor
-setInterval(() => {
-    const serverStatus = {
+function broadcastPlayerCount() {
+    io.emit('serverStatus', {
         online: true,
         playerCount: Object.keys(players).length,
-        maxPlayers: 100,
-        timestamp: Date.now()
-    };
-    // Emite o status para TODOS os sockets conectados, incluindo os da tela de seleção
-    io.emit('serverStatus', serverStatus);
-}, 2000); // A cada 2 segundos
+        maxPlayers: 100 // Exemplo
+    });
+    // Também emitimos um evento separado para o painel admin
+    io.emit('updatePlayerCount', Object.keys(players).length);
+}
 
 io.on('connection', (socket) => {
-    console.log(`[CONEXÃO] Socket ${socket.id} estabeleceu conexão.`);
+    console.log(`[CONEXÃO] Novo socket conectado: ${socket.id}`);
+    
+    // Envia o status atual assim que alguém conecta
+    broadcastPlayerCount();
 
+    // Quando um jogador efetivamente entra no mundo com um personagem
     socket.on('joinGame', (playerData) => {
         if (!playerData || !playerData.id) {
-            console.log(`[AVISO] Socket ${socket.id} tentou entrar sem um ID de personagem.`);
+            console.log(`[AVISO] Tentativa de join sem um ID de personagem válido do socket ${socket.id}`);
             return;
         }
 
-        const charId = playerData.id;
-        const oldSocketId = charIdToSocketId[charId];
-
-        if (oldSocketId && oldSocketId !== socket.id) {
-            console.log(`[RECONEXÃO] ${playerData.name} (Char ID: ${charId}) reconectou com um novo socket: ${socket.id}.`);
-            const oldSocket = io.sockets.sockets.get(oldSocketId);
-            if (oldSocket) {
-                console.log(`[LIMPEZA] Desconectando socket antigo e inativo: ${oldSocketId}.`);
-                oldSocket.disconnect(true);
-            }
-            delete players[oldSocketId];
-        } else {
-            console.log(`[JOIN] ${playerData.name} (Char ID: ${charId}) entrou no jogo com o socket ${socket.id}.`);
-        }
+        console.log(`[JOIN] ${playerData.name} (Char ID: ${playerData.id}) entrou no jogo com o socket ${socket.id}.`);
         
-        socket.charId = charId;
-        charIdToSocketId[charId] = socket.id;
-        players[socket.id] = { socketId: socket.id, ...playerData };
+        // Armazena o ID do personagem no objeto do socket para referência futura
+        socket.charId = playerData.id;
 
+        // Adiciona o jogador à lista usando seu ID de personagem
+        players[playerData.id] = {
+            socketId: socket.id, // Mantém o socketId para referência
+            ...playerData
+        };
+
+        // Envia a lista de todos os jogadores atuais para o novo jogador
         socket.emit('currentPlayers', players);
-        socket.broadcast.emit('newPlayer', players[socket.id]);
+
+        // Notifica os outros jogadores sobre o novo jogador
+        socket.broadcast.emit('newPlayer', players[playerData.id]);
+
+        // Atualiza a contagem de jogadores para todos
+        broadcastPlayerCount();
     });
 
     socket.on('playerMovement', (movementData) => {
-        const player = players[socket.id];
+        const player = players[socket.charId];
         if (player) {
+            // Atualiza os dados de movimento do jogador
             Object.assign(player, movementData);
+            // Transmite a atualização para os outros jogadores
             socket.broadcast.emit('playerMoved', player);
         }
     });
 
     socket.on('disconnect', () => {
-        const player = players[socket.id];
-        if (player) {
-            console.log(`[DESCONEXÃO] ${player.name} (Char ID: ${player.id}) desconectou.`);
-            delete players[socket.id];
-            delete charIdToSocketId[player.id];
-            io.emit('playerDisconnected', player.id); 
+        // Usa o charId armazenado no socket para identificar quem desconectou
+        const charId = socket.charId;
+        if (charId && players[charId]) {
+            console.log(`[DESCONEXÃO] ${players[charId].name} (Char ID: ${charId}) desconectou.`);
+            
+            // Remove o jogador da lista
+            delete players[charId];
+            
+            // Notifica os outros jogadores que este personagem saiu
+            io.emit('playerDisconnected', charId);
+            
+            // Atualiza a contagem de jogadores
+            broadcastPlayerCount();
         } else {
-            console.log(`[DESCONEXÃO] Socket anônimo ${socket.id} desconectou.`);
+            console.log(`[DESCONEXÃO] Socket anônimo ${socket.id} fechado.`);
         }
     });
 });
 
-// Lógica para Desconexão em Massa (Reinício do Servidor)
-process.on('SIGINT', () => {
-    console.log("Servidor está sendo desligado. Desconectando todos os jogadores...");
-    io.emit('serverShutdown', { message: 'O servidor está reiniciando. Você foi desconectado.' });
-    setTimeout(() => {
-        process.exit(0);
-    }, 1000); // Dá 1 segundo para a mensagem ser enviada
-});
-
-
+// Rota de verificação de saúde para o Render
 app.get('/', (req, res) => {
   res.send('Servidor Rusher Online está rodando!');
 });
