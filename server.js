@@ -19,81 +19,48 @@ const io = socketIo(server, {
   }
 });
 
+// O Render.com define a porta através de uma variável de ambiente.
+// Usamos a porta dele, ou a 3001 se estivermos testando localmente.
 const port = process.env.PORT || 3001;
 
-// Objeto para armazenar jogadores, agora usando o ID do personagem como chave principal.
 const players = {};
 
 function broadcastPlayerCount() {
-    io.emit('serverStatus', {
-        online: true,
-        playerCount: Object.keys(players).length,
-        maxPlayers: 100 // Exemplo
-    });
-    // Também emitimos um evento separado para o painel admin
     io.emit('updatePlayerCount', Object.keys(players).length);
 }
 
 io.on('connection', (socket) => {
-    // console.log(`[CONEXÃO] Novo socket conectado: ${socket.id}`);
-    
-    // Envia o status atual assim que alguém conecta
+    console.log(`[CONEXÃO] Novo jogador conectado: ${socket.id}`);
     broadcastPlayerCount();
 
-    // Quando um jogador efetivamente entra no mundo com um personagem
     socket.on('joinGame', (playerData) => {
-        if (!playerData || !playerData.id) {
-            // console.log(`[AVISO] Tentativa de join sem um ID de personagem válido do socket ${socket.id}`);
+        if (!playerData || !playerData.name) {
+            console.log(`[AVISO] Tentativa de join sem dados válidos do jogador ${socket.id}`);
             return;
         }
-
-        // console.log(`[JOIN] ${playerData.name} (Char ID: ${playerData.id}) entrou no jogo com o socket ${socket.id}.`);
-        
-        // Armazena o ID do personagem no objeto do socket para referência futura
-        socket.charId = playerData.id;
-
-        // Adiciona o jogador à lista usando seu ID de personagem
-        players[playerData.id] = {
-            socketId: socket.id, // Mantém o socketId para referência
-            ...playerData
-        };
-
-        // Envia a lista de todos os jogadores atuais para o novo jogador
+        console.log(`[JOIN] ${playerData.name} (${socket.id}) entrou no jogo.`);
+        players[socket.id] = { id: socket.id, ...playerData };
         socket.emit('currentPlayers', players);
-
-        // Notifica os outros jogadores sobre o novo jogador
-        socket.broadcast.emit('newPlayer', players[playerData.id]);
-
-        // Atualiza a contagem de jogadores para todos
+        socket.broadcast.emit('newPlayer', players[socket.id]);
         broadcastPlayerCount();
     });
 
     socket.on('playerMovement', (movementData) => {
-        const player = players[socket.charId];
+        const player = players[socket.id];
         if (player) {
-            // Atualiza os dados de movimento do jogador
             Object.assign(player, movementData);
-            // Transmite a atualização para os outros jogadores
             socket.broadcast.emit('playerMoved', player);
         }
     });
 
     socket.on('disconnect', () => {
-        // Usa o charId armazenado no socket para identificar quem desconectou
-        const charId = socket.charId;
-        if (charId && players[charId]) {
-            // console.log(`[DESCONEXÃO] ${players[charId].name} (Char ID: ${charId}) desconectou.`);
-            
-            // Remove o jogador da lista
-            delete players[charId];
-            
-            // Notifica os outros jogadores que este personagem saiu
-            io.emit('playerDisconnected', charId);
-            
-            // Atualiza a contagem de jogadores
+        if (players[socket.id]) {
+            console.log(`[DESCONEXÃO] ${players[socket.id].name} desconectou.`);
+            delete players[socket.id];
+            io.emit('playerDisconnected', socket.id);
             broadcastPlayerCount();
         } else {
-            // console.log(`[DESCONEXÃO] Socket anônimo ${socket.id} fechado.`);
+            console.log(`[DESCONEXÃO] Conexão anônima ${socket.id} fechada.`);
         }
     });
 });
