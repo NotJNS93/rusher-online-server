@@ -37,7 +37,7 @@ const io = socketIo(server, {
   }
 });
 
-const port = process.env.PORT || 3001;
+const port = process.env.PORT;
 
 const players = {};
 
@@ -103,3 +103,4 @@ app.get('/', (req, res) => {
 server.listen(port, () => {
   console.log(`🚀 Servidor Rusher Online rodando na porta ${port}`);
 });
+
