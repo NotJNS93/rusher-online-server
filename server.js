@@ -27,13 +27,10 @@ app.use(cors());
 
 const server = http.createServer(app);
 
-// [CORREÇÃO] Configurações de CORS mais explícitas e compatíveis
+// [CORREÇÃO] Simplificando a configuração de CORS para máxima compatibilidade
 const io = socketIo(server, {
   cors: {
     origin: "*", // Permite qualquer origem
-    methods: ["GET", "POST"],
-    allowedHeaders: ["my-custom-header"],
-    credentials: true
   }
 });
 
@@ -103,4 +100,3 @@ app.get('/', (req, res) => {
 server.listen(port, () => {
   console.log(`🚀 Servidor Rusher Online rodando na porta ${port}`);
 });
-
