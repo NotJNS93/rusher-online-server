@@ -27,14 +27,17 @@ app.use(cors());
 
 const server = http.createServer(app);
 
-// [CORREÇÃO] Simplificando a configuração de CORS para máxima compatibilidade
+// [CORREÇÃO] Configuração de transporte para máxima compatibilidade
 const io = socketIo(server, {
   cors: {
-    origin: "*", // Permite qualquer origem
-  }
+    origin: "*",
+  },
+  // Garante que a conexão comece com polling, que é mais estável,
+  // e depois tente atualizar para websocket.
+  transports: ['polling', 'websocket'] 
 });
 
-const port = process.env.PORT;
+const port = process.env.PORT || 3001;
 
 const players = {};
 
@@ -44,7 +47,7 @@ function broadcastPlayerCount() {
 }
 
 io.on('connection', (socket) => {
-    console.log(`[CONEXÃO] Novo jogador conectado: ${socket.id}`);
+    console.log(`[CONEXÃO] Novo jogador conectado: ${socket.id} via ${socket.conn.transport.name}`);
     
     socket.on('joinGame', async (playerData) => {
         if (!playerData || !playerData.id || !playerData.name) {
