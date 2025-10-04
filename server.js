@@ -27,18 +27,14 @@ app.use(cors());
 
 const server = http.createServer(app);
 
-// [CORREÇÃO FINAL] Configuração de CORS e transporte mais robusta para produção
 const io = socketIo(server, {
   cors: {
-    origin: "https://play-rusher.web.app", // Domínio explícito do seu jogo
-    methods: ["GET", "POST"],
-    credentials: true
-  },
-  allowEIO3: true, // Habilita compatibilidade com clientes mais antigos (importante para proxies)
-  transports: ['polling', 'websocket']
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
 });
 
-const port = process.env.PORT;
+const port = process.env.PORT || 3001;
 
 const players = {};
 
@@ -48,21 +44,31 @@ function broadcastPlayerCount() {
 }
 
 io.on('connection', (socket) => {
-    console.log(`[CONEXÃO] Novo jogador conectado: ${socket.id} via ${socket.conn.transport.name}`);
+    console.log(`[CONEXÃO] Novo jogador conectado: ${socket.id}`);
     
-    // Envia a contagem de jogadores assim que alguém conecta, antes mesmo do joinGame
     broadcastPlayerCount();
-    
+
     socket.on('joinGame', async (playerData) => {
-        if (!playerData || !playerData.id || !playerData.name) {
+        if (!playerData || !playerData.id || !playerData.name || !playerData.uid) {
             console.log(`[AVISO] Tentativa de join sem dados válidos do jogador ${socket.id}`);
             return;
         }
-        console.log(`[JOIN] ${playerData.name} (${socket.id}) entrou no jogo com o charId: ${playerData.id}`);
+        console.log(`[JOIN] ${playerData.name} (UID: ${playerData.uid}) entrou no jogo.`);
         
-        players[socket.id] = { socketId: socket.id, charId: playerData.id, ...playerData };
+        players[socket.id] = { 
+            socketId: socket.id, 
+            charId: playerData.id, 
+            uid: playerData.uid, // Armazena o UID do usuário
+            ...playerData 
+        };
+
         try {
-            await db.collection('players_online').doc(playerData.id).set(playerData);
+            await db.collection('players_online').doc(playerData.id).set({
+                name: playerData.name,
+                level: playerData.level,
+                class: playerData.class,
+                uid: playerData.uid
+            });
             console.log(`[FIRESTORE] ${playerData.name} adicionado a players_online.`);
         } catch(error) {
             console.error("[ERRO] Falha ao adicionar jogador em players_online:", error);
@@ -70,6 +76,7 @@ io.on('connection', (socket) => {
         
         socket.emit('currentPlayers', players);
         socket.broadcast.emit('newPlayer', players[socket.id]);
+        broadcastPlayerCount();
     });
 
     socket.on('playerMovement', (movementData) => {
@@ -80,22 +87,43 @@ io.on('connection', (socket) => {
         }
     });
 
+    // [NOVO] Listener para o evento de desconexão vindo do admin
+    socket.on('admin:disconnectUser', (data) => {
+        const { uidToDisconnect, reason } = data;
+        console.log(`[ADMIN] Recebida ordem para desconectar UID: ${uidToDisconnect}`);
+        
+        // Encontra todos os sockets associados àquele UID
+        for (const socketId in players) {
+            if (players[socketId].uid === uidToDisconnect) {
+                const targetSocket = io.sockets.sockets.get(socketId);
+                if (targetSocket) {
+                    // Envia o evento de desconexão forçada para o cliente específico
+                    targetSocket.emit('admin:forceDisconnect', { reason: reason || "Você foi desconectado por um administrador." });
+                    // Força a desconexão do socket no lado do servidor
+                    targetSocket.disconnect(true);
+                    console.log(`[ADMIN] Socket ${socketId} (UID: ${uidToDisconnect}) desconectado.`);
+                }
+            }
+        }
+    });
+
     socket.on('disconnect', async () => {
         const player = players[socket.id];
         if (player) {
             console.log(`[DESCONEXÃO] ${player.name} (${socket.id}) desconectou.`);
+
             try {
                 await db.collection('players_online').doc(player.charId).delete();
                 console.log(`[FIRESTORE] ${player.name} (charId: ${player.charId}) removido de players_online.`);
             } catch (error) {
                 console.error("[ERRO] Falha ao remover jogador de players_online:", error);
             }
+            
             delete players[socket.id];
             io.emit('playerDisconnected', player.charId);
             broadcastPlayerCount();
         } else {
             console.log(`[DESCONEXÃO] Conexão anônima ${socket.id} fechada.`);
-            // Mesmo em desconexão anônima, é bom atualizar a contagem
             broadcastPlayerCount();
         }
     });
