@@ -27,17 +27,18 @@ app.use(cors());
 
 const server = http.createServer(app);
 
-// [CORREÇÃO] Configuração de transporte para máxima compatibilidade
+// [CORREÇÃO FINAL] Configuração de CORS e transporte mais robusta para produção
 const io = socketIo(server, {
   cors: {
-    origin: "*",
+    origin: "https://play-rusher.web.app", // Domínio explícito do seu jogo
+    methods: ["GET", "POST"],
+    credentials: true
   },
-  // Garante que a conexão comece com polling, que é mais estável,
-  // e depois tente atualizar para websocket.
-  transports: ['polling', 'websocket'] 
+  allowEIO3: true, // Habilita compatibilidade com clientes mais antigos (importante para proxies)
+  transports: ['polling', 'websocket']
 });
 
-const port = process.env.PORT || 3001;
+const port = process.env.PORT;
 
 const players = {};
 
@@ -48,6 +49,9 @@ function broadcastPlayerCount() {
 
 io.on('connection', (socket) => {
     console.log(`[CONEXÃO] Novo jogador conectado: ${socket.id} via ${socket.conn.transport.name}`);
+    
+    // Envia a contagem de jogadores assim que alguém conecta, antes mesmo do joinGame
+    broadcastPlayerCount();
     
     socket.on('joinGame', async (playerData) => {
         if (!playerData || !playerData.id || !playerData.name) {
@@ -66,7 +70,6 @@ io.on('connection', (socket) => {
         
         socket.emit('currentPlayers', players);
         socket.broadcast.emit('newPlayer', players[socket.id]);
-        broadcastPlayerCount();
     });
 
     socket.on('playerMovement', (movementData) => {
@@ -92,6 +95,8 @@ io.on('connection', (socket) => {
             broadcastPlayerCount();
         } else {
             console.log(`[DESCONEXÃO] Conexão anônima ${socket.id} fechada.`);
+            // Mesmo em desconexão anônima, é bom atualizar a contagem
+            broadcastPlayerCount();
         }
     });
 });
